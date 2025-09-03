@@ -37,6 +37,7 @@
     --sidebar-accent-foreground: 0 0% 9.0196%;
     --sidebar-border: 0 0% 89.8039%;
     --sidebar-ring: 0 0% 63.1373%;
+    --sidebar-background: 0 0% 98.0392%;
     --font-sans: Geist Mono, monospace;
     --font-serif: Geist Mono, monospace;
     --font-mono: Geist Mono, monospace;
@@ -91,6 +92,7 @@
     --sidebar-accent-foreground: 0 0% 98.0392%;
     --sidebar-border: 0 0% 100%;
     --sidebar-ring: 0 0% 32.1569%;
+    --sidebar-background: 0 0% 9.0196%;
     --font-sans: Geist Mono, monospace;
     --font-serif: Geist Mono, monospace;
     --font-mono: Geist Mono, monospace;

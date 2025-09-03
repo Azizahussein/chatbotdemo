@@ -73,6 +73,9 @@ const NotificationPopover = ({ userId }: { userId: string }) => {
     return `$${ebitda.toLocaleString()}`;
   };
 
+  // Create a ref to store the connect function to avoid dependency issues
+  const connectWebSocketRef = useRef<() => void>();
+
   const connectWebSocket = useCallback(() => {
     // Prevent multiple simultaneous connection attempts
     if (
@@ -170,7 +173,8 @@ const NotificationPopover = ({ userId }: { userId: string }) => {
         if (event.code !== 1000 && event.code !== 1001) {
           reconnectTimeoutRef.current = setTimeout(() => {
             console.log("🔄 Attempting to reconnect WebSocket...");
-            connectWebSocket();
+            // Use the ref to avoid dependency issues
+            connectWebSocketRef.current?.();
           }, 3000);
         }
       };
@@ -182,10 +186,16 @@ const NotificationPopover = ({ userId }: { userId: string }) => {
       // Attempt to reconnect after 5 seconds
       reconnectTimeoutRef.current = setTimeout(() => {
         console.log("🔄 Attempting to reconnect WebSocket...");
-        connectWebSocket();
+        // Use the ref to avoid dependency issues
+        connectWebSocketRef.current?.();
       }, 5000);
     }
-  }, [userId]); // Removed fetchAndTransition dependency
+  }, [userId, fetchAndTransition]);
+
+  // Store the function in the ref
+  useEffect(() => {
+    connectWebSocketRef.current = connectWebSocket;
+  }, [connectWebSocket]);
 
   useEffect(() => {
     if (userId) {
@@ -208,7 +218,7 @@ const NotificationPopover = ({ userId }: { userId: string }) => {
       // Reset connection state
       isConnectingRef.current = false;
     };
-  }, [userId]); // Removed connectWebSocket dependency to prevent infinite loops
+  }, [userId, connectWebSocket]); // Added connectWebSocket dependency
 
   return (
     <div className="relative">
