@@ -46,10 +46,13 @@ export function ChatbotSidebar({
       </SidebarHeader>
 
       <SidebarGroup>
-        <Button onClick={onNewChat} size="sm" variant="outline" className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">Conversations</h2>
+          <Button onClick={onNewChat} size="sm" variant="outline" className="flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
             <Plus className="h-5 w-5" />
             <span className="text-sm font-medium">New Chat</span>
           </Button>
+          </div>
       </SidebarGroup>
       
       <SidebarContent className="flex-1">
