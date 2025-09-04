@@ -96,7 +96,6 @@ export default function ChatbotPage() {
 }
 
   async function handleDeleteConversation(id: string) {
-  // Optimistically remove from UI
   setConversations(prev => prev.filter(c => c.id !== id));
   if (activeId === id) {
     const remaining = conversations.filter(c => c.id !== id);
