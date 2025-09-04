@@ -24,9 +24,6 @@ type Conversation = {
   messages: ChatMessage[];
 };
 
-const STORAGE_KEY = "chatbot.conversations";
-const ACTIVE_KEY = "chatbot.activeId";
-
 function generateId(prefix: string = "id"): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
 }
@@ -37,6 +34,7 @@ export default function ChatbotPage() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const starterPrompts = useMemo(
     () => [
@@ -48,86 +46,78 @@ export default function ChatbotPage() {
     [],
   );
 
-  // Load from localStorage
   useEffect(() => {
+  const loadConversations = async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? (JSON.parse(raw) as Conversation[]) : [];
-      setConversations(parsed);
-      const savedActive = localStorage.getItem(ACTIVE_KEY);
-      if (savedActive && parsed.find(c => c.id === savedActive)) {
-        setActiveId(savedActive);
-      } else if (parsed[0]) {
-        setActiveId(parsed[0].id);
+      const res = await fetch("/api/chat/conversations");
+      const data = await res.json();
+      if (data?.conversations) {
+        setConversations(data.conversations);
+        setActiveId(data.conversations[0]?.id ?? null);
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.error("Failed to load conversations from DB:", error);
+    } finally {
+      setIsLoading(false);
     }
-  }, []);
+  };
 
-  // Persist to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    } catch {
-      // ignore
-    }
-  }, [conversations]);
+  loadConversations();
+}, []);
 
-  useEffect(() => {
-    if (activeId) {
-      try {
-        localStorage.setItem(ACTIVE_KEY, activeId);
-      } catch {
-        // ignore
-      }
-    }
-  }, [activeId]);
 
   const activeConversation = useMemo(
     () => conversations.find(c => c.id === activeId) || null,
     [conversations, activeId],
   );
 
-  function handleNewChat() {
-    const id = generateId("conv");
-    const newConv: Conversation = {
-      id,
-      title: "New chat",
-      createdAt: Date.now(),
-      messages: [],
-    };
-    setConversations(prev => [newConv, ...prev]);
-    setActiveId(id);
-    setInput("");
-    setTimeout(() => inputRef.current?.focus(), 0);
+  async function handleNewChat() {
+  try {
+    const res = await fetch("/api/chat/create", {
+      method: "POST",
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.conversation) {
+      setConversations(prev => {
+        const exists = prev.some(c => c.id === data.conversation.id);
+        return exists ? prev : [data.conversation, ...prev];
+      });
+      setActiveId(data.conversation.id);
+      setInput("");
+      setTimeout(() => inputRef.current?.focus(), 0);
+    } else {
+      console.error("Failed to create conversation:", data.error);
+    }
+  } catch (err) {
+    console.error("Error creating conversation:", err);
+  }
+}
+
+  async function handleDeleteConversation(id: string) {
+  // Optimistically remove from UI
+  setConversations(prev => prev.filter(c => c.id !== id));
+  if (activeId === id) {
+    const remaining = conversations.filter(c => c.id !== id);
+    setActiveId(remaining[0]?.id ?? null);
   }
 
-  function handleDeleteConversation(id: string) {
-    setConversations(prev => prev.filter(c => c.id !== id));
-    if (activeId === id) {
-      const remaining = conversations.filter(c => c.id !== id);
-      setActiveId(remaining[0]?.id ?? null);
-    }
+  // Delete from DB
+  try {
+    await fetch("/api/chat/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: id }),
+    });
+  } catch (error) {
+    console.error("Failed to delete conversation:", error);
   }
+}
 
   async function sendMessage() {
     const trimmed = input.trim();
     if (!trimmed || isSending) return;
-    let convId = activeId;
-    // Create a conversation if none exists
-    if (!convId) {
-      const id = generateId("conv");
-      const newConv: Conversation = {
-        id,
-        title: trimmed.slice(0, 30) || "New chat",
-        createdAt: Date.now(),
-        messages: [],
-      };
-      setConversations(prev => [newConv, ...prev]);
-      setActiveId(id);
-      convId = id;
-    }
 
     const userMsg: ChatMessage = {
       id: generateId("msg"),
@@ -136,33 +126,76 @@ export default function ChatbotPage() {
       createdAt: Date.now(),
     };
 
-    setInput("");
-    setIsSending(true);
-    setConversations(prev =>
-      prev.map(c =>
-        c.id === convId
-          ? {
-              ...c,
-              title: c.messages.length === 0 ? trimmed.slice(0, 30) || c.title : c.title,
-              messages: [...c.messages, userMsg],
-            }
-          : c,
-      ),
-    );
-
-    // Simulate assistant reply locally (no backend calls)
-    await new Promise(r => setTimeout(r, 400));
     const assistantMsg: ChatMessage = {
       id: generateId("msg"),
       role: "assistant",
       content: `Pretend AI: ${trimmed}`,
       createdAt: Date.now(),
     };
-    setConversations(prev =>
-      prev.map(c => (c.id === convId ? { ...c, messages: [...c.messages, assistantMsg] } : c)),
-    );
-    setIsSending(false);
+
+    setInput("");
+    setIsSending(true);
+
+    try {
+      if (!activeId) {
+        // Create new conversation with messages
+        const res = await fetch("/api/chat/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: null,
+            title: trimmed.slice(0, 30),
+            messages: [userMsg, assistantMsg],
+          }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.conversation) {
+          setConversations(prev => {
+            const exists = prev.some(c => c.id === data.conversation.id);
+            return exists ? prev : [data.conversation, ...prev];
+          });
+          setActiveId(data.conversation.id);
+        } else {
+          console.error("Failed to create conversation:", data);
+        }
+      } else {
+        // Update existing conversation's messages locally
+        setConversations(prev =>
+          prev.map(c => {
+            if (c.id === activeId) {
+              const updatedTitle = c.title === "New Chat" ? trimmed.slice(0, 30) : c.title;
+              return {
+                ...c,
+                title: updatedTitle,
+                messages: [...(c.messages ?? []), userMsg, assistantMsg],
+              };
+            }
+            return c;
+          })
+        );
+
+
+        // Also send updated messages to server
+        await fetch("/api/chat/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: activeId,
+            title: trimmed.slice(0, 30),
+            messages: [userMsg, assistantMsg],
+          }),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to save message:", error);
+    } finally {
+      setIsSending(false);
+    }
   }
+
+
+
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -178,7 +211,10 @@ export default function ChatbotPage() {
           conversations={conversations}
           activeId={activeId}
           onNewChat={handleNewChat}
-          onSelectConversation={setActiveId}
+          onSelectConversation={(id) => {
+            setActiveId(id);
+            setInput("");
+          }}
           onDeleteConversation={handleDeleteConversation}
         />
 
@@ -190,13 +226,17 @@ export default function ChatbotPage() {
               <div className="text-sm font-semibold">Chatbot</div>
             </div>
             <div className="text-xs text-muted-foreground">
-              Stored locally • Enter to send, Shift+Enter for newline
+              Stored in a Database • Enter to send, Shift+Enter for newline
             </div>
           </div>
 
         <ScrollArea className="flex-1 p-4">
           <div className="mx-auto w-full max-w-3xl">
-            {activeConversation?.messages.length ? (
+            {isLoading ? (
+              <div className="text-center py-10 text-muted-foreground">
+                Loading conversations...
+              </div>
+            ) : activeConversation?.messages?.length ? (
               <div className="flex flex-col gap-6">
                 {activeConversation.messages.map(msg => (
                   <div
@@ -211,18 +251,22 @@ export default function ChatbotPage() {
                         <Avatar className="h-8 w-8">
                           <AvatarFallback>AI</AvatarFallback>
                         </Avatar>
-                        <div className={cn(
-                          "prose prose-sm max-w-none rounded-md border bg-accent px-4 py-3 text-sm leading-relaxed dark:prose-invert",
-                        )}>
+                        <div
+                          className={cn(
+                            "prose prose-sm max-w-none rounded-md border bg-accent px-4 py-3 text-sm leading-relaxed dark:prose-invert",
+                          )}
+                        >
                           {msg.content}
                         </div>
                       </>
                     ) : (
                       <>
-                        <div className={cn(
-                          "prose prose-sm max-w-none rounded-md border px-4 py-3 text-sm leading-relaxed text-primary-foreground dark:prose-invert",
-                          "bg-primary",
-                        )}>
+                        <div
+                          className={cn(
+                            "prose prose-sm max-w-none rounded-md border px-4 py-3 text-sm leading-relaxed text-primary-foreground dark:prose-invert",
+                            "bg-primary",
+                          )}
+                        >
                           {msg.content}
                         </div>
                         <Avatar className="h-8 w-8">
@@ -257,6 +301,8 @@ export default function ChatbotPage() {
           </div>
         </ScrollArea>
 
+
+
         <div className="sticky bottom-0 border-t bg-background/80 p-3 backdrop-blur">
           <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-xl border p-2 shadow-sm">
             <Textarea
@@ -276,4 +322,5 @@ export default function ChatbotPage() {
         </div>
       </SidebarProvider>
     );
+    
 }
