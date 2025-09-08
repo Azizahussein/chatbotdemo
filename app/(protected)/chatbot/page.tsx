@@ -114,6 +114,36 @@ export default function ChatbotPage() {
   }
 }
 
+const assistantReplyFromGoogle = async (message: string): Promise<string> => {
+  try {
+    const res = await fetch("/api/chat/ask-google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+
+    const text = await res.text();
+
+    try {
+      const data = JSON.parse(text);
+      if (res.ok && data.message) {
+        return data.message;
+      } else {
+        console.error("Google AI error:", data.error || data);
+        return "Sorry, I couldn't process that.";
+      }
+    } catch (parseErr) {
+      console.error("Invalid JSON returned by /api/chat/ask-google:", text);
+      return "The AI returned invalid response. Please try again.";
+    }
+
+  } catch (err) {
+    console.error("Failed to get response from /api/chat/ask-google:", err);
+    return "Something went wrong contacting the AI.";
+  }
+};
+
+
   async function sendMessage() {
     const trimmed = input.trim();
     if (!trimmed || isSending) return;
@@ -125,10 +155,12 @@ export default function ChatbotPage() {
       createdAt: Date.now(),
     };
 
+    const aiResponse = await assistantReplyFromGoogle(trimmed);
+
     const assistantMsg: ChatMessage = {
       id: generateId("msg"),
       role: "assistant",
-      content: `Pretend AI: ${trimmed}`,
+      content: aiResponse,
       createdAt: Date.now(),
     };
 
