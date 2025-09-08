@@ -112,6 +112,19 @@ export async function POST(req: NextRequest) {
 
     const aiReply = data.candidates[0].content.parts[0].text.trim();
 
+    // Quick cleanup of AI reply to remove unwanted prefixes/labels and extra spaces
+    function cleanAIReply(text: string) {
+      // Remove common user/assistant labels or short prefixes at start (e.g. "U\nAI", "AI\n", "hi\n")
+      const cleaned = text
+        .replace(/^(U|AI|User|Assistant|Hi|Hello)[\n\s]*/i, '') // remove single labels at start
+        .replace(/\n{2,}/g, '\n') // reduce multiple newlines to one
+        .trim();
+
+      return cleaned;
+    }
+
+    const filteredReply = cleanAIReply(aiReply);
+
     // Save user message and AI reply back to DB
     let conversation;
 
@@ -124,7 +137,7 @@ export async function POST(req: NextRequest) {
           messages: {
             create: [
               { role: "user", content: userMessage },
-              { role: "assistant", content: aiReply },
+              { role: "assistant", content: filteredReply },
             ],
           },
         },
@@ -138,7 +151,7 @@ export async function POST(req: NextRequest) {
           messages: {
             create: [
               { role: "user", content: userMessage },
-              { role: "assistant", content: aiReply },
+              { role: "assistant", content: filteredReply },
             ],
           },
         },
@@ -146,7 +159,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ message: aiReply, conversation });
+    return NextResponse.json({ message: filteredReply, conversation });
   } catch (error) {
     console.error("❌ General error in /api/chat/ask-google:", error);
     return NextResponse.json({ error: "Server error: " + error }, { status: 500 });

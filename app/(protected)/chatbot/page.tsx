@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ChatbotSidebar } from "@/components/ChatbotSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import ReactMarkdown from "react-markdown";
 
 
 type ChatMessage = {
@@ -287,7 +288,7 @@ const assistantReplyFromGoogle = async (message: string): Promise<string> => {
                             "prose prose-sm max-w-none rounded-md border bg-accent px-4 py-3 text-sm leading-relaxed dark:prose-invert",
                           )}
                         >
-                          {msg.content}
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
                         </div>
                       </>
                     ) : (
@@ -298,7 +299,7 @@ const assistantReplyFromGoogle = async (message: string): Promise<string> => {
                             "bg-primary",
                           )}
                         >
-                          {msg.content}
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
                         </div>
                         <Avatar className="h-8 w-8">
                           <AvatarFallback>U</AvatarFallback>
