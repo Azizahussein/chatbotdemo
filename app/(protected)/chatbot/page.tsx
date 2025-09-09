@@ -60,7 +60,7 @@ export default function ChatbotPage() {
           const fixedConversations = data.conversations.map(conv => ({
             ...conv,
             title:
-              conv.title === "New Chat" && conv.messages?.length > 0
+              conv.title === "New Chat" && conv.messages?.length && conv.messages[0]?.content
                 ? conv.messages[0].content.slice(0, 30) // First message snippet
                 : conv.title,
           }));
@@ -79,10 +79,15 @@ export default function ChatbotPage() {
   }, []);
 
 
-  const activeConversation = useMemo(
-    () => conversations.find(c => c.id === activeId) || null,
-    [conversations, activeId],
-  );
+  const activeConversation = useMemo(() => {
+    const conv = conversations.find(c => c.id === activeId);
+    if (!conv) return null;
+    const sortedMessages = [...conv.messages].sort((a, b) => a.createdAt - b.createdAt);
+    return {
+      ...conv,
+      messages: sortedMessages,
+    };
+  }, [conversations, activeId]);
 
   async function handleNewChat() {
     try {
@@ -168,14 +173,18 @@ const assistantReplyFromGoogle = async (
       const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId);
 
       if (updatedConversation) {
+        const sortedMessages = [...(updatedConversation.messages || [])].sort(
+          (a, b) => a.createdAt - b.createdAt
+        );
+
         // Extract the first message content to use as the new title
-        const firstMessageContent = updatedConversation.messages?.[0]?.content ?? "New Chat";
+        const firstMessageContent = sortedMessages[0]?.content ?? "New Chat";
         const newTitle = firstMessageContent.slice(0, 30);
 
         // Update the conversation list with the updated conversation and new title
         setConversations(prev => {
           const others = prev.filter(c => c.id !== updatedConversation.id);
-          const updatedConv = { ...updatedConversation, title: newTitle };
+          const updatedConv = { ...updatedConversation, messages: sortedMessages, title: newTitle };
           return [updatedConv, ...others];
         });
 
