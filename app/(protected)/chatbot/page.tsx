@@ -86,7 +86,9 @@ export default function ChatbotPage() {
     if (!conv) return null;
 
     const messages = conv.messages ?? [];
-    const sortedMessages = [...messages].sort((a, b) => a.createdAt - b.createdAt);
+    const sortedMessages = [...messages].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
 
     return {
       ...conv,
