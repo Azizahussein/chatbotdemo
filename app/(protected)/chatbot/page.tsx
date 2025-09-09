@@ -47,24 +47,36 @@ export default function ChatbotPage() {
     [],
   );
 
-  useEffect(() => {
-  const loadConversations = async () => {
-    try {
-      const res = await fetch("/api/chat/conversations");
-      const data = await res.json();
-      if (data?.conversations) {
-        setConversations(data.conversations);
-        setActiveId(data.conversations[0]?.id ?? null);
-      }
-    } catch (error) {
-      console.error("Failed to load conversations from DB:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  
 
-  loadConversations();
-}, []);
+  useEffect(() => {
+    const loadConversations = async () => {
+      try {
+        const res = await fetch("/api/chat/conversations");
+        // Tell TypeScript what the expected shape of the data is
+        const data: { conversations: Conversation[] } = await res.json();
+
+        if (data?.conversations) {
+          const fixedConversations = data.conversations.map(conv => ({
+            ...conv,
+            title:
+              conv.title === "New Chat" && conv.messages?.length > 0
+                ? conv.messages[0].content.slice(0, 30) // First message snippet
+                : conv.title,
+          }));
+
+          setConversations(fixedConversations);
+          setActiveId(fixedConversations[0]?.id ?? null);
+        }
+      } catch (error) {
+        console.error("Failed to load conversations from DB:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadConversations();
+  }, []);
 
 
   const activeConversation = useMemo(
@@ -73,28 +85,32 @@ export default function ChatbotPage() {
   );
 
   async function handleNewChat() {
-  try {
-    const res = await fetch("/api/chat/create", {
-      method: "POST",
-    });
+    try {
+      const defaultTitle = starterPrompts[0] || "New Chat";
 
-    const data = await res.json();
-
-    if (res.ok && data.conversation) {
-      setConversations(prev => {
-        const exists = prev.some(c => c.id === data.conversation.id);
-        return exists ? prev : [data.conversation, ...prev];
+      const res = await fetch("/api/chat/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: defaultTitle }),
       });
-      setActiveId(data.conversation.id);
-      setInput("");
-      setTimeout(() => inputRef.current?.focus(), 0);
-    } else {
-      console.error("Failed to create conversation:", data.error);
+
+      const data = await res.json();
+
+      if (res.ok && data.conversation) {
+        setConversations(prev => {
+          const exists = prev.some(c => c.id === data.conversation.id);
+          return exists ? prev : [data.conversation, ...prev];
+        });
+        setActiveId(data.conversation.id);
+        setInput("");
+        setTimeout(() => inputRef.current?.focus(), 0);
+      } else {
+        console.error("Failed to create conversation:", data.error);
+      }
+    } catch (err) {
+      console.error("Error creating conversation:", err);
     }
-  } catch (err) {
-    console.error("Error creating conversation:", err);
   }
-}
 
   async function handleDeleteConversation(id: string) {
   setConversations(prev => prev.filter(c => c.id !== id));
@@ -141,8 +157,7 @@ const assistantReplyFromGoogle = async (
 };
 
 
-
-  async function sendMessage() {
+ async function sendMessage() {
     const trimmed = input.trim();
     if (!trimmed || isSending) return;
 
@@ -153,11 +168,25 @@ const assistantReplyFromGoogle = async (
       const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId);
 
       if (updatedConversation) {
+        // Extract the first message content to use as the new title
+        const firstMessageContent = updatedConversation.messages?.[0]?.content ?? "New Chat";
+        const newTitle = firstMessageContent.slice(0, 30);
+
+        // Update the conversation list with the updated conversation and new title
         setConversations(prev => {
           const others = prev.filter(c => c.id !== updatedConversation.id);
-          return [updatedConversation, ...others];
+          const updatedConv = { ...updatedConversation, title: newTitle };
+          return [updatedConv, ...others];
         });
+
         setActiveId(updatedConversation.id);
+
+        // Send a request to update the title in the backend database
+        await fetch("/api/chat/update-title", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversationId: updatedConversation.id, title: newTitle }),
+        });
       } else {
         console.error("No conversation returned from AI call.");
       }

@@ -1,8 +1,9 @@
 import { auth } from "@/auth";
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   const userSession = await auth();
 
   if (!userSession?.user?.email) {
@@ -17,10 +18,12 @@ export async function POST() {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  const { title } = await req.json();
+
   const conversation = await prisma.chatConversation.create({
     data: {
       userId: user.id,
-      title: "New chat",
+      title: title || "New chat",  // Use passed title or fallback
     },
   });
 
