@@ -115,112 +115,54 @@ export default function ChatbotPage() {
   }
 }
 
-const assistantReplyFromGoogle = async (message: string): Promise<string> => {
+const assistantReplyFromGoogle = async (
+  message: string,
+  conversationId: string | null
+): Promise<Conversation | null> => {
   try {
     const res = await fetch("/api/chat/ask-google", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, conversationId }),
     });
 
-    const text = await res.text();
+    const data = await res.json();
 
-    try {
-      const data = JSON.parse(text);
-      if (res.ok && data.message) {
-        return data.message;
-      } else {
-        console.error("Google AI error:", data.error || data);
-        return "Sorry, I couldn't process that.";
-      }
-    } catch (parseErr) {
-      console.error("Invalid JSON returned by /api/chat/ask-google:", text);
-      return "The AI returned invalid response. Please try again.";
+    if (res.ok && data.conversation) {
+      return data.conversation;
+    } else {
+      console.error("Google AI error:", data.error || data);
+      return null;
     }
-
   } catch (err) {
     console.error("Failed to get response from /api/chat/ask-google:", err);
-    return "Something went wrong contacting the AI.";
+    return null;
   }
 };
+
 
 
   async function sendMessage() {
     const trimmed = input.trim();
     if (!trimmed || isSending) return;
 
-    const userMsg: ChatMessage = {
-      id: generateId("msg"),
-      role: "user",
-      content: trimmed,
-      createdAt: Date.now(),
-    };
-
-    const aiResponse = await assistantReplyFromGoogle(trimmed);
-
-    const assistantMsg: ChatMessage = {
-      id: generateId("msg"),
-      role: "assistant",
-      content: aiResponse,
-      createdAt: Date.now(),
-    };
-
-    setInput("");
     setIsSending(true);
+    setInput("");
 
     try {
-      if (!activeId) {
-        // Create new conversation with messages
-        const res = await fetch("/api/chat/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationId: null,
-            title: trimmed.slice(0, 30),
-            messages: [userMsg, assistantMsg],
-          }),
-        });
-        const data = await res.json();
+      const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId);
 
-        if (res.ok && data.conversation) {
-          setConversations(prev => {
-            const exists = prev.some(c => c.id === data.conversation.id);
-            return exists ? prev : [data.conversation, ...prev];
-          });
-          setActiveId(data.conversation.id);
-        } else {
-          console.error("Failed to create conversation:", data);
-        }
+      if (updatedConversation) {
+        setConversations(prev => {
+          const others = prev.filter(c => c.id !== updatedConversation.id);
+          return [updatedConversation, ...others];
+        });
+        setActiveId(updatedConversation.id);
       } else {
-        // Update existing conversation's messages locally
-        setConversations(prev =>
-          prev.map(c => {
-            if (c.id === activeId) {
-              const updatedTitle = c.title === "New Chat" ? trimmed.slice(0, 30) : c.title;
-              return {
-                ...c,
-                title: updatedTitle,
-                messages: [...(c.messages ?? []), userMsg, assistantMsg],
-              };
-            }
-            return c;
-          })
-        );
-
-
-        // Also send updated messages to server
-        await fetch("/api/chat/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationId: activeId,
-            title: trimmed.slice(0, 30),
-            messages: [userMsg, assistantMsg],
-          }),
-        });
+        console.error("No conversation returned from AI call.");
       }
     } catch (error) {
-      console.error("Failed to save message:", error);
+      console.error("Failed to send message:", error);
     } finally {
       setIsSending(false);
     }
@@ -270,7 +212,9 @@ const assistantReplyFromGoogle = async (message: string): Promise<string> => {
               </div>
             ) : activeConversation?.messages?.length ? (
               <div className="flex flex-col gap-6">
-                {activeConversation.messages.map(msg => (
+                {[...activeConversation.messages]
+                .sort((a, b) => a.createdAt - b.createdAt)
+                .map(msg => (
                   <div
                     key={msg.id}
                     className={cn(

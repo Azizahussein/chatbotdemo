@@ -79,13 +79,14 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         contents: promptMessages.map((msg) => ({
-          parts: [{ text: msg.content }],
-        })),
+        role: msg.author === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }],
+      })),
       }),
     });
 
     const raw = await response.text();
-    console.log("🔍 Raw response from Google:", raw);
+    //console.log("🔍 Raw response from Google:", raw);
     console.log("📦 Status code:", response.status);
 
     let data;
@@ -136,8 +137,16 @@ export async function POST(req: NextRequest) {
           title: "New Chat",
           messages: {
             create: [
-              { role: "user", content: userMessage },
-              { role: "assistant", content: filteredReply },
+              {
+                role: "user",
+                content: userMessage,
+                createdAt: new Date(), // 🕒 now
+              },
+              {
+                role: "assistant",
+                content: filteredReply,
+                createdAt: new Date(Date.now() + 5), // 🕒 +5ms to ensure it appears after
+              },
             ],
           },
         },
@@ -150,8 +159,16 @@ export async function POST(req: NextRequest) {
         data: {
           messages: {
             create: [
-              { role: "user", content: userMessage },
-              { role: "assistant", content: filteredReply },
+              {
+                role: "user",
+                content: userMessage,
+                createdAt: new Date(), // 🕒 now
+              },
+              {
+                role: "assistant",
+                content: filteredReply,
+                createdAt: new Date(Date.now() + 5), // 🕒 +5ms
+              },
             ],
           },
         },
