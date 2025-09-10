@@ -13,7 +13,6 @@ export async function DELETE(req: Request) {
   const ip =
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
 
-  // Rate limit: 10 requests per minute per IP
   const { ok, remaining, reset } = await rateLimit(
     `api:get-conversations:${ip}`,
     10,       // max 10 requests
