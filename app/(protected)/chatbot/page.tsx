@@ -60,8 +60,11 @@ export default function ChatbotPage() {
           const fixedConversations = data.conversations.map(conv => ({
             ...conv,
             title:
-              conv.title === "New Chat" && conv.messages?.length && conv.messages[0]?.content
-                ? conv.messages[0].content.slice(0, 30) // First message snippet
+              conv.title === "New Chat" &&
+              Array.isArray(conv.messages) &&
+              conv.messages.length > 0 &&
+              conv.messages[0]?.content
+                ? conv.messages[0].content.slice(0, 30)
                 : conv.title,
           }));
 
