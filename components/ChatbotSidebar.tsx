@@ -6,6 +6,8 @@ import { Plus, Trash2, MessageSquare, ChevronDown } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
+  SidebarMenuAction,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -14,6 +16,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import useCurrentUser from "@/hooks/use-current-user"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { MoreHorizontal, LogOut } from "lucide-react"
+import { signOut } from "next-auth/react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 type Conversation = {
@@ -38,6 +45,7 @@ export function ChatbotSidebar({
   onSelectConversation,
   onDeleteConversation
 }: ChatbotSidebarProps) {
+  const user = useCurrentUser();
   return (
     <Sidebar className="border-r h-full min-w-[340px]">
       <SidebarHeader className="border-b p-5 bg-background border-b-2 space-y-3">
@@ -123,6 +131,57 @@ export function ChatbotSidebar({
           </Collapsible>
         </SidebarGroup>
       </SidebarContent>
+
+      <SidebarFooter className="border-t bg-background">
+        <SidebarMenu>
+          {user ? (
+            <SidebarMenuItem>
+              <div className="relative">
+                <SidebarMenuButton asChild className="h-12 pr-10">
+                  <button onClick={() => window.location.href = `/profile/${user?.id}`} className="flex items-center gap-3 w-full text-left">
+                    <Avatar className="h-8 w-8">
+                      {user?.image ? (
+                        <AvatarImage src={user.image as string} alt={user?.name || user?.email || "User"} />
+                      ) : null}
+                      <AvatarFallback>{(user?.name?.[0] || user?.email?.[0] || "U").toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm font-medium">{user?.name || "Signed in user"}</span>
+                      <span className="truncate text-xs text-muted-foreground">{user?.email || ""}</span>
+                    </div>
+                  </button>
+                </SidebarMenuButton>
+                <SidebarMenuAction className="right-2 top-2.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="top" align="end" className="w-36">
+                      <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/auth/login" })} className="gap-2">
+                        <LogOut className="h-4 w-4" />
+                        Sign out
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </SidebarMenuAction>
+              </div>
+            </SidebarMenuItem>
+          ) : (
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="h-12">
+                <a href="http://localhost:3000/auth/login" className="flex items-center gap-3 w-full">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm font-medium">Sign in</span>
+                    <span className="truncate text-xs text-muted-foreground">Access your account</span>
+                  </div>
+                </a>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   )
 }

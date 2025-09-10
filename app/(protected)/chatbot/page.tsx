@@ -23,7 +23,7 @@ type Conversation = {
   id: string;
   title: string;
   createdAt: number;
-  messages: ChatMessage[];
+  messages: ChatMessage[]; //array of chat messages
 };
 
 const STORAGE_KEY = "chatbot.conversations";
@@ -53,18 +53,13 @@ export default function ChatbotPage() {
   const animationFrameRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Autocomplete state
-  const [isAutoCompleting, setIsAutoCompleting] = useState(false);
 
-  const starterPrompts = useMemo(
-    () => [
-      "Summarize this product: AI CRM for sales teams",
-      "Give me 5 marketing ideas for a B2B fintech startup",
-      "Draft a polite follow-up email to a potential client",
-      "Explain EBITDA margin like I'm new to finance",
-    ],
-    [],
-  );
+  const starterPrompts = [
+    "Summarize this product: AI CRM for sales teams",
+    "Give me 5 marketing ideas for a B2B fintech startup",
+    "Draft a polite follow-up email to a potential client",
+    "Explain EBITDA margin like I'm new to finance",
+  ];
 
   // Load from localStorage
   useEffect(() => {
@@ -342,32 +337,6 @@ export default function ChatbotPage() {
     }
   }
 
-  // Autocomplete handler (client-side heuristic)
-  function onAutocomplete() {
-    if (isAutoCompleting) return;
-    setIsAutoCompleting(true);
-
-    const base = input.trim();
-    let suggestion = "";
-
-    if (!base) {
-      // If no input, suggest from starter prompts (cycle pick)
-      const index = Math.floor(Date.now() / 1000) % starterPrompts.length;
-      suggestion = starterPrompts[index];
-    } else {
-      // Simple heuristic completion
-      const suffix =
-        " Please include any relevant context (industry, size, region) so I can tailor the response.";
-      suggestion = base.endsWith(".") ? base + suffix : base + "." + suffix;
-    }
-
-    // Simulate small latency
-    setTimeout(() => {
-      setInput(suggestion);
-      setIsAutoCompleting(false);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }, 150);
-  }
 
   return (
     <SidebarProvider>
@@ -533,7 +502,7 @@ export default function ChatbotPage() {
                 )}
 
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" onClick={onAutocomplete} aria-label="Autocomplete" disabled={isAutoCompleting}>
+                  <Button variant="ghost" size="icon" onClick={() => {}} aria-label="Autocomplete">
                     <Sparkles className="h-5 w-5" />
                   </Button>
                   <div className="flex items-center">
