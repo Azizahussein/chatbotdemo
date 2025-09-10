@@ -36,8 +36,6 @@ export default function ChatbotPage() {
   const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [file, setFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const starterPrompts = useMemo(
     () => [
@@ -84,18 +82,12 @@ export default function ChatbotPage() {
   const activeConversation = useMemo(() => {
     const conv = conversations.find(c => c.id === activeId);
     if (!conv) return null;
-
-    const messages = conv.messages ?? [];
-    const sortedMessages = [...messages].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-
+    const sortedMessages = [...conv.messages].sort((a, b) => a.createdAt - b.createdAt);
     return {
       ...conv,
       messages: sortedMessages,
     };
   }, [conversations, activeId]);
-
 
   async function handleNewChat() {
     try {
@@ -144,76 +136,65 @@ export default function ChatbotPage() {
   }
 }
 
-const handleFileUpload = async (file: File) => {
-  const formData = new FormData();
-  formData.append("file", file);
+const assistantReplyFromGoogle = async (
+  message: string,
+  conversationId: string | null
+): Promise<Conversation | null> => {
+  try {
+    const res = await fetch("/api/chat/ask-google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, conversationId }),
+    });
 
-  const res = await fetch("/api/chat/upload", {
-    method: "POST",
-    body: formData,
-  });
+    const data = await res.json();
 
-  if (!res.ok) {
-    console.error("Upload failed");
-    return;
+    if (res.ok && data.conversation) {
+      return data.conversation;
+    } else {
+      console.error("Google AI error:", data.error || data);
+      return null;
+    }
+  } catch (err) {
+    console.error("Failed to get response from /api/chat/ask-google:", err);
+    return null;
   }
-
-  const result = await res.json();
-  console.log("Uploaded and processed:", result);
 };
 
 
-
-  async function sendMessage() {
+ async function sendMessage() {
     const trimmed = input.trim();
-    if (!trimmed && !file) return;
-    if (isSending) return;
+    if (!trimmed || isSending) return;
 
     setIsSending(true);
     setInput("");
 
     try {
-      const formData = new FormData();
-      formData.append("message", trimmed);
-      if (file) {
-        formData.append("file", file);
-      }
-      if (activeId) {
-        formData.append("conversationId", activeId);
-      }
+      const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId);
 
-      const res = await fetch("/api/chat/ask-google", {
-        method: "POST",
-        body: formData, // Note: No headers when using FormData
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.conversation) {
-        const sortedMessages = [...(data.conversation.messages || [])].sort(
+      if (updatedConversation) {
+        const sortedMessages = [...(updatedConversation.messages || [])].sort(
           (a, b) => a.createdAt - b.createdAt
         );
 
+        // Extract the first message content to use as the new title
         const firstMessageContent = sortedMessages[0]?.content ?? "New Chat";
         const newTitle = firstMessageContent.slice(0, 30);
 
+        // Update the conversation list with the updated conversation and new title
         setConversations(prev => {
-          const others = prev.filter(c => c.id !== data.conversation.id);
-          return [
-            { ...data.conversation, messages: sortedMessages, title: newTitle },
-            ...others,
-          ];
+          const others = prev.filter(c => c.id !== updatedConversation.id);
+          const updatedConv = { ...updatedConversation, messages: sortedMessages, title: newTitle };
+          return [updatedConv, ...others];
         });
 
-        setActiveId(data.conversation.id);
+        setActiveId(updatedConversation.id);
 
+        // Send a request to update the title in the backend database
         await fetch("/api/chat/update-title", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversationId: data.conversation.id,
-            title: newTitle,
-          }),
+          body: JSON.stringify({ conversationId: updatedConversation.id, title: newTitle }),
         });
       } else {
         console.error("No conversation returned from AI call.");
@@ -222,9 +203,9 @@ const handleFileUpload = async (file: File) => {
       console.error("Failed to send message:", error);
     } finally {
       setIsSending(false);
-      setFile(null); // Clear file after sending
     }
   }
+
 
 
 
@@ -338,47 +319,15 @@ const handleFileUpload = async (file: File) => {
 
         <div className="sticky bottom-0 border-t bg-background/80 p-3 backdrop-blur">
           <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-xl border p-2 shadow-sm">
-            
-            {/* File attach button */}
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-10 h-10"
-            >
-              📎
-            </Button>
-
-            {/* Hidden file input */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => {
-                if (e.target.files?.[0]) {
-                  setFile(e.target.files[0]);
-                }
-              }}
-              className="hidden"
-            />
-
-            {/* Optional: show selected file name */}
-            {file && (
-              <span className="text-xs text-muted-foreground max-w-[150px] truncate">
-                {file.name}
-              </span>
-            )}
-
             <Textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask me anything..."
               rows={2}
             />
-
-            <Button onClick={sendMessage} disabled={isSending} className="shrink-0">
+            <Button onClick={sendMessage} disabled={!input.trim() || isSending} className="shrink-0">
               {isSending ? "Sending..." : "Send"}
             </Button>
           </div>

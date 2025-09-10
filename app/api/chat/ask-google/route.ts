@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { auth } from "@/auth";
-import { uploadFileToGCS } from "@/lib/gcs";
-import { readFileFromGCS } from "@/lib/gcs";
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,37 +18,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const formData = await req.formData();
-    const userMessage = formData.get("message")?.toString() || "";
-    const conversationId = formData.get("conversationId")?.toString() || null;
-    const file = formData.get("file");
+    const { conversationId, message: userMessage } = await req.json();
 
     if (!userMessage || userMessage.trim() === "") {
       return NextResponse.json(
         { error: "Message is required" },
         { status: 400 }
       );
-    }
-
-    let uploadedFileUrl: string | undefined = undefined;
-    let fullUserMessage = userMessage;
-
-    if (file && file instanceof Blob) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-
-      const timestamp = Date.now();
-      const originalName = (file as any).name || "uploaded-file";
-      const filename = `uploads/${user.id}-${timestamp}-${originalName}`;
-
-      const contentType = file.type || "application/octet-stream";
-
-      uploadedFileUrl = await uploadFileToGCS(buffer, filename, contentType);
-
-      // Read back the file content to include in the prompt
-      const fileContent = await readFileFromGCS(filename);
-
-      // Append file content to user message, or alternatively append URL only
-      fullUserMessage += `\n\n[Uploaded file content]:\n${fileContent}`;
     }
 
     const API_KEY = process.env.GOOGLE_AI_API_KEY;
@@ -92,7 +66,7 @@ export async function POST(req: NextRequest) {
     // Build prompt messages with all previous messages + current user message
     const promptMessages = [
       ...previousMessages,
-      { author: "user", content: fullUserMessage },
+      { author: "user", content: userMessage },
     ];
 
     // Call Google API
@@ -165,7 +139,7 @@ export async function POST(req: NextRequest) {
             create: [
               {
                 role: "user",
-                content: fullUserMessage,
+                content: userMessage,
                 createdAt: new Date(), // 🕒 now
               },
               {
@@ -187,7 +161,7 @@ export async function POST(req: NextRequest) {
             create: [
               {
                 role: "user",
-                content: fullUserMessage,
+                content: userMessage,
                 createdAt: new Date(), // 🕒 now
               },
               {

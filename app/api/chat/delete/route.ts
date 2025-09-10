@@ -9,14 +9,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: userSession.user.email },
-  });
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
   const { conversationId } = await req.json();
 
   if (!conversationId) {
@@ -28,7 +20,7 @@ export async function POST(req: Request) {
     where: { id: conversationId },
   });
 
-  if (!conversation || conversation.userId !== user.id) {
+  if (!conversation) {
     return NextResponse.json({ error: "Conversation not found or access denied" }, { status: 404 });
   }
 
