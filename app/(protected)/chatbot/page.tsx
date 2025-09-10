@@ -85,7 +85,9 @@ export default function ChatbotPage() {
   const activeConversation = useMemo(() => {
     const conv = conversations.find(c => c.id === activeId);
     if (!conv) return null;
-    const sortedMessages = [...conv.messages].sort((a, b) => a.createdAt - b.createdAt);
+    const sortedMessages = Array.isArray(conv.messages)
+      ? [...conv.messages].sort((a, b) => a.createdAt - b.createdAt)
+      : [];
     return {
       ...conv,
       messages: sortedMessages,
