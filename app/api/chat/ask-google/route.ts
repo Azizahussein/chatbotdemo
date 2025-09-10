@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
         }
         const word = words[i++];
         controller.enqueue(encoder.encode(word + " "));
-        setTimeout(pushWord, 30); // simulate delay
+        setTimeout(pushWord, 40); // simulate delay
       }
 
       pushWord();
