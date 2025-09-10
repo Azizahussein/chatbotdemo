@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { auth } from "@/auth";
+import { rateLimit } from "@/lib/redis";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,27 @@ export async function POST(req: NextRequest) {
 
   if (!userSession?.user?.email) {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+
+  // RATE LIMIT: max 10 requests per minute per IP
+  const { ok, remaining, reset } = await rateLimit(
+    `api:chat-post:${ip}`,
+    10,      // 10 requests
+    60_000   // per 60 seconds
+  );
+
+  if (!ok) {
+    return new Response("Too many requests", {
+      status: 429,
+      headers: {
+        "RateLimit-Limit": "10",
+        "RateLimit-Remaining": String(remaining),
+        "RateLimit-Reset": String(Math.ceil((reset - Date.now()) / 1000)),
+      },
+    });
   }
 
   const user = await prisma.user.findUnique({
