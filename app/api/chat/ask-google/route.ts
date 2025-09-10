@@ -1,171 +1,155 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import { auth } from "@/auth";
 
+export const runtime = "nodejs";
+
 export async function POST(req: NextRequest) {
-  try {
-    const userSession = await auth();
+  const userSession = await auth();
 
-    if (!userSession?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!userSession?.user?.email) {
+    return new Response("Unauthorized", { status: 401 });
+  }
 
-    const user = await prisma.user.findUnique({
-      where: { email: userSession.user.email },
+  const user = await prisma.user.findUnique({
+    where: { email: userSession.user.email },
+  });
+
+  if (!user) {
+    return new Response("User not found", { status: 404 });
+  }
+
+  const { conversationId, message: userMessage } = await req.json();
+
+  if (!userMessage || userMessage.trim() === "") {
+    return new Response("Message is required", { status: 400 });
+  }
+
+  const API_KEY = process.env.GOOGLE_AI_API_KEY;
+  if (!API_KEY) {
+    console.error("❌ Missing GOOGLE_AI_API_KEY");
+    return new Response("Missing Google API key", { status: 500 });
+  }
+
+  // Fetch prior messages
+  let previousMessages: { author: string; content: string }[] = [];
+
+  if (conversationId) {
+    const conversation = await prisma.chatConversation.findUnique({
+      where: { id: conversationId },
+      include: { messages: { orderBy: { createdAt: "asc" } } },
     });
 
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
+    if (!conversation) return new Response("Conversation not found", { status: 404 });
+    if (conversation.userId !== user.id) return new Response("Forbidden", { status: 403 });
 
-    const { conversationId, message: userMessage } = await req.json();
+    previousMessages = conversation.messages.map(msg => ({
+      author: msg.role === "user" ? "user" : "assistant",
+      content: msg.content,
+    }));
+  }
 
-    if (!userMessage || userMessage.trim() === "") {
-      return NextResponse.json(
-        { error: "Message is required" },
-        { status: 400 }
-      );
-    }
+  const promptMessages = [
+    ...previousMessages,
+    { author: "user", content: userMessage },
+  ];
 
-    const API_KEY = process.env.GOOGLE_AI_API_KEY;
-    if (!API_KEY) {
-      console.error("❌ Missing GOOGLE_AI_API_KEY");
-      return NextResponse.json(
-        { error: "Missing Google API key" },
-        { status: 500 }
-      );
-    }
-
-    // Fetch previous messages for the conversation (if conversationId provided)
-    let previousMessages: { author: string; content: string }[] = [];
-
-    if (conversationId) {
-      const conversation = await prisma.chatConversation.findUnique({
-        where: { id: conversationId },
-        include: { messages: { orderBy: { createdAt: "asc" } } },
-      });
-
-      if (!conversation) {
-        return NextResponse.json(
-          { error: "Conversation not found" },
-          { status: 404 }
-        );
-      }
-
-      // Optional: ensure this conversation belongs to current user
-      if (conversation.userId !== user.id) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-
-      previousMessages = conversation.messages.map((msg) => ({
-        author: msg.role === "user" ? "user" : "assistant",
-        content: msg.content,
-      }));
-    }
-
-    // Build prompt messages with all previous messages + current user message
-    const promptMessages = [
-      ...previousMessages,
-      { author: "user", content: userMessage },
-    ];
-
-    // Call Google API
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
-
-    const response = await fetch(apiUrl, {
+  // Call Gemini API
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`,
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: promptMessages.map((msg) => ({
-        role: msg.author === "assistant" ? "model" : "user",
-        parts: [{ text: msg.content }],
-      })),
+          role: msg.author === "assistant" ? "model" : "user",
+          parts: [{ text: msg.content }],
+        })),
       }),
-    });
-
-    const raw = await response.text();
-    //console.log("🔍 Raw response from Google:", raw);
-    console.log("📦 Status code:", response.status);
-
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (err) {
-      console.error("❌ Failed to parse JSON from Google:", err);
-      return NextResponse.json(
-        {
-          error: "Invalid JSON returned by Google AI",
-          raw,
-        },
-        { status: 500 }
-      );
     }
+  );
 
-    if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      console.error("⚠️ Google response missing candidates:", data);
-      return NextResponse.json(
-        { error: "No valid candidates in Google response", raw: data },
-        { status: 500 }
-      );
-    }
+  const raw = await response.text();
 
-    const aiReply = data.candidates[0].content.parts[0].text.trim();
-
-    // Save user message and AI reply back to DB
-    let conversation;
-
-    if (!conversationId) {
-      // Create new conversation with both messages
-      conversation = await prisma.chatConversation.create({
-        data: {
-          userId: user.id,
-          title: "New Chat",
-          messages: {
-            create: [
-              {
-                role: "user",
-                content: userMessage,
-                createdAt: new Date(), // 🕒 now
-              },
-              {
-                role: "assistant",
-                content: aiReply,
-                createdAt: new Date(Date.now() + 5), // 🕒 +5ms to ensure it appears after
-              },
-            ],
-          },
-        },
-        include: { messages: true },
-      });
-    } else {
-      // Append messages to existing conversation
-      conversation = await prisma.chatConversation.update({
-        where: { id: conversationId },
-        data: {
-          messages: {
-            create: [
-              {
-                role: "user",
-                content: userMessage,
-                createdAt: new Date(), // 🕒 now
-              },
-              {
-                role: "assistant",
-                content: aiReply,
-                createdAt: new Date(Date.now() + 5), // 🕒 +5ms
-              },
-            ],
-          },
-        },
-        include: { messages: true },
-      });
-    }
-
-    return NextResponse.json({ message: aiReply, conversation });
-  } catch (error) {
-    console.error("❌ General error in /api/chat/ask-google:", error);
-    return NextResponse.json({ error: "Server error: " + error }, { status: 500 });
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (err) {
+    console.error("❌ Invalid JSON from Gemini:", err);
+    return new Response("Invalid response from Google AI", { status: 500 });
   }
+
+  const aiReply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!aiReply) {
+    return new Response("No valid AI response", { status: 500 });
+  }
+
+  // Save messages in the DB in parallel (non-blocking)
+  const now = new Date();
+  const aiMessageData = {
+    role: "assistant",
+    content: aiReply,
+    createdAt: new Date(now.getTime() + 1),
+  };
+
+  const userMessageData = {
+    role: "user",
+    content: userMessage,
+    createdAt: now,
+  };
+
+  (async () => {
+    try {
+      if (!conversationId) {
+        await prisma.chatConversation.create({
+          data: {
+            userId: user.id,
+            title: "New Chat",
+            messages: {
+              create: [userMessageData, aiMessageData],
+            },
+          },
+        });
+      } else {
+        await prisma.chatConversation.update({
+          where: { id: conversationId },
+          data: {
+            messages: {
+              create: [userMessageData, aiMessageData],
+            },
+          },
+        });
+      }
+    } catch (err) {
+      console.error("❌ Failed to save messages to DB:", err);
+    }
+  })();
+
+  // ✅ Simulate streaming the text word-by-word
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const words = aiReply.split(" ");
+      let i = 0;
+
+      function pushWord() {
+        if (i >= words.length) {
+          controller.close();
+          return;
+        }
+        const word = words[i++];
+        controller.enqueue(encoder.encode(word + " "));
+        setTimeout(pushWord, 30); // simulate delay
+      }
+
+      pushWord();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
 }

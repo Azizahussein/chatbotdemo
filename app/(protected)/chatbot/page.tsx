@@ -36,6 +36,7 @@ export default function ChatbotPage() {
   const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
 
   const starterPrompts = useMemo(
     () => [
@@ -143,7 +144,8 @@ export default function ChatbotPage() {
 
 const assistantReplyFromGoogle = async (
   message: string,
-  conversationId: string | null
+  conversationId: string | null,
+  onStreamChunk?: (chunk: string) => void
 ): Promise<Conversation | null> => {
   try {
     const res = await fetch("/api/chat/ask-google", {
@@ -152,64 +154,126 @@ const assistantReplyFromGoogle = async (
       body: JSON.stringify({ message, conversationId }),
     });
 
-    const data = await res.json();
-
-    if (res.ok && data.conversation) {
-      return data.conversation;
-    } else {
-      console.error("Google AI error:", data.error || data);
-      return null;
+    if (!res.body) {
+      throw new Error("No response body for streaming");
     }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    let assistantMessage = "";
+    let newConversation: Conversation | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      assistantMessage += chunk;
+
+      // Push streamed chunk to UI
+      onStreamChunk?.(chunk);
+    }
+
+    // Once stream is done, refetch full updated conversation
+    const finalRes = await fetch("/api/chat/conversations");
+    const finalData: { conversations: Conversation[] } = await finalRes.json();
+
+    newConversation = finalData.conversations.find(c => c.id === conversationId) ?? null;
+
+    return newConversation;
   } catch (err) {
-    console.error("Failed to get response from /api/chat/ask-google:", err);
+    console.error("Streaming failed:", err);
     return null;
   }
 };
 
 
  async function sendMessage() {
-    const trimmed = input.trim();
-    if (!trimmed || isSending) return;
+  const trimmed = input.trim();
+  if (!trimmed || isSending) return;
 
-    setIsSending(true);
-    setInput("");
+  setIsSending(true);
+  setInput("");
 
-    try {
-      const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId);
+  const messageId = generateId("user");
+  const assistantId = generateId("assistant");
 
-      if (updatedConversation) {
-        const sortedMessages = [...(updatedConversation.messages || [])].sort(
-          (a, b) => a.createdAt - b.createdAt
-        );
+  const now = Date.now();
 
-        // Extract the first message content to use as the new title
-        const firstMessageContent = sortedMessages[0]?.content ?? "New Chat";
-        const newTitle = firstMessageContent.slice(0, 30);
+  const userMessage: ChatMessage = {
+    id: messageId,
+    role: "user",
+    content: trimmed,
+    createdAt: now,
+  };
 
-        // Update the conversation list with the updated conversation and new title
-        setConversations(prev => {
-          const others = prev.filter(c => c.id !== updatedConversation.id);
-          const updatedConv = { ...updatedConversation, messages: sortedMessages, title: newTitle };
-          return [updatedConv, ...others];
-        });
+  const assistantMessage: ChatMessage = {
+    id: assistantId,
+    role: "assistant",
+    content: "",
+    createdAt: now + 1,
+  };
 
-        setActiveId(updatedConversation.id);
-
-        // Send a request to update the title in the backend database
-        await fetch("/api/chat/update-title", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversationId: updatedConversation.id, title: newTitle }),
-        });
-      } else {
-        console.error("No conversation returned from AI call.");
+  // Optimistically add user and empty assistant message
+  setConversations(prev => {
+    const updated = prev.map(conv => {
+      if (conv.id === activeId) {
+        return {
+          ...conv,
+          messages: [...(conv.messages ?? []), userMessage, assistantMessage],
+        };
       }
-    } catch (error) {
-      console.error("Failed to send message:", error);
-    } finally {
-      setIsSending(false);
-    }
+      return conv;
+    });
+    return updated;
+  });
+
+  // Start streaming
+  setTypingMessageId(assistantId);
+  let streamedContent = "";
+  const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId, (chunk) => {
+    streamedContent += chunk;
+    setConversations(prev =>
+      prev.map(conv => {
+        if (conv.id === activeId) {
+          return {
+            ...conv,
+            messages: conv.messages.map(msg =>
+              msg.id === assistantId ? { ...msg, content: streamedContent } : msg
+            ),
+          };
+        }
+        return conv;
+      })
+    );
+  });
+
+  if (updatedConversation) {
+    const sortedMessages = [...(updatedConversation.messages || [])].sort(
+      (a, b) => a.createdAt - b.createdAt
+    );
+    const firstMessageContent = sortedMessages[0]?.content ?? "New Chat";
+    const newTitle = firstMessageContent.slice(0, 30);
+
+    setConversations(prev => {
+      const others = prev.filter(c => c.id !== updatedConversation.id);
+      const updatedConv = { ...updatedConversation, messages: sortedMessages, title: newTitle };
+      return [updatedConv, ...others];
+    });
+
+    setActiveId(updatedConversation.id);
+
+    await fetch("/api/chat/update-title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: updatedConversation.id, title: newTitle }),
+    });
   }
+
+  setTypingMessageId(null);
+  setIsSending(false);
+}
 
 
 
@@ -275,7 +339,9 @@ const assistantReplyFromGoogle = async (
                             "prose prose-sm max-w-none rounded-md border bg-accent px-4 py-3 text-sm leading-relaxed dark:prose-invert",
                           )}
                         >
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          <ReactMarkdown>
+                            {typingMessageId === msg.id ? msg.content + "▍" : msg.content}
+                          </ReactMarkdown>
                         </div>
                       </>
                     ) : (
