@@ -124,23 +124,20 @@ export default function ChatbotPage() {
   }
 
   async function handleDeleteConversation(id: string) {
-  setConversations(prev => prev.filter(c => c.id !== id));
-  if (activeId === id) {
-    const remaining = conversations.filter(c => c.id !== id);
-    setActiveId(remaining[0]?.id ?? null);
+    setConversations(prev => prev.filter(c => c.id !== id));
+    if (activeId === id) {
+      const remaining = conversations.filter(c => c.id !== id);
+      setActiveId(remaining[0]?.id ?? null);
+    }
+    try {
+      await fetch(`/api/chat/delete?conversationId=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+    }
   }
 
-  // Delete from DB
-  try {
-    await fetch("/api/chat/delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: id }),
-    });
-  } catch (error) {
-    console.error("Failed to delete conversation:", error);
-  }
-}
 
 const assistantReplyFromGoogle = async (
   message: string,

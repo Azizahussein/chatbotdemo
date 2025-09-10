@@ -2,14 +2,15 @@ import { auth } from "@/auth";
 import prisma from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
-export async function POST(req: Request) {
+export async function DELETE(req: Request) {
   const userSession = await auth();
 
   if (!userSession?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const { conversationId } = await req.json();
+  
+  const url = new URL(req.url);
+  const conversationId = url.searchParams.get("conversationId");
 
   if (!conversationId) {
     return NextResponse.json({ error: "Missing conversationId" }, { status: 400 });
