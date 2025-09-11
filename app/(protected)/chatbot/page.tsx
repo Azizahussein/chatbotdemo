@@ -511,22 +511,6 @@ export default function ChatbotPage() {
                       )}
                     </div>
                   ))}
-                  {isSending && (
-                    <div className="flex w-full items-start gap-3 justify-start">
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback>AI</AvatarFallback>
-                      </Avatar>
-                      <div className="flex items-start gap-2">
-                        <div className="rounded-2xl border bg-accent px-4 py-3 text-sm shadow-sm">
-                          <div className="flex items-center gap-1">
-                            <span className="h-1.5 w-1.5 rounded-full bg-foreground/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <span className="h-1.5 w-1.5 rounded-full bg-foreground/60 animate-bounce" style={{ animationDelay: "120ms" }} />
-                            <span className="h-1.5 w-1.5 rounded-full bg-foreground/60 animate-bounce" style={{ animationDelay: "240ms" }} />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="mx-auto max-w-3xl py-16 flex min-h-[60vh] flex-col items-center justify-center">
