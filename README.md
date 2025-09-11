@@ -61,7 +61,7 @@ To configure Google authentication, set the following environment variables in y
     ```env
     GOOGLE_CLIENT_ID=your-google-client-id
     GOOGLE_CLIENT_SECRET=your-google-client-secret
-     GOOGLE_AI_API_KEY=your-google-generative-language-api-key
+    GOOGLE_AI_API_KEY=your-google-generative-language-api-key
     ```
   - Save the `.env` file. Ensure this file is **not** committed to version control by adding `.env` to your `.gitignore` file.
 
