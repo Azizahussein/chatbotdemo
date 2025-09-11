@@ -111,7 +111,7 @@ export default function ChatbotPage() {
 
   async function handleNewChat() {
     try {
-      const defaultTitle = starterPrompts[0] || "New Chat";
+      const defaultTitle = "New Chat";
 
       const res = await fetch("/api/chat/create", {
         method: "POST",
