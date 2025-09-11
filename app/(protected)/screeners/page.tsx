@@ -11,11 +11,12 @@ import {
   Clock,
   Plus,
   Edit,
-  Trash2,
   Eye,
   Filter,
   Search,
 } from "lucide-react";
+import DeleteScreenerButton from "./delete-screener-button";
+import AddScreenerDialog from "@/components/Dialogs/create-screener-dialog";
 
 export const metadata = {
   title: "Screeners",
@@ -40,10 +41,7 @@ const Screeners = async () => {
               Manage your deal screening criteria and evaluation rules
             </p>
           </div>
-          <Button className="gap-2">
-            <Plus className="h-4 w-4" />
-            Create Screener
-          </Button>
+          <AddScreenerDialog />
         </div>
       </div>
 
@@ -176,13 +174,7 @@ const Screeners = async () => {
                       <Edit className="h-3 w-3" />
                       Edit
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2 text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <DeleteScreenerButton screenerId={screener.id} />
                   </div>
                 </CardContent>
               </Card>

@@ -1,13 +1,12 @@
 import {
   Card,
   CardHeader,
-  CardTitle,
   CardDescription,
   CardContent,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import React from "react";
 
 const loading = () => {
@@ -43,12 +42,6 @@ const loading = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              <span>Analyzing Document...</span>
-            </div>
-          </CardTitle>
           <CardDescription>
             <Skeleton className="h-4 w-1/2 rounded" />
           </CardDescription>

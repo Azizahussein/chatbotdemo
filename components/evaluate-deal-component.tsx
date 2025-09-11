@@ -8,7 +8,8 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { evaluateDeal } from "@/app/actions/evaluate-deal";
 import { saveEvaluation } from "@/app/actions/save-evaluation";
 import { CheckCircle, XCircle, AlertCircle, Loader2, Save } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
 
 interface DealEvaluation {
   success: boolean;
@@ -29,7 +30,7 @@ const EvaluateDealComponent = ({
   screenerId: string;
 }) => {
   const [isPending, startTransition] = useTransition();
-  const [isSaving, setIsSaving] = useState(false);
+  const [isSaving, startSavingTransition] = useTransition();
   const [dealEvaluation, setDealEvaluation] = useState<DealEvaluation | null>(
     null,
   );
@@ -38,54 +39,44 @@ const EvaluateDealComponent = ({
     message?: string;
     error?: string;
   } | null>(null);
-  const { toast } = useToast();
 
   const dealEvaluationHandler = () => {
     startTransition(async () => {
       const result = await evaluateDeal(dealId, screenerId);
-      console.log("result", result);
-      setDealEvaluation(result);
-      setSaveResult(null); // Reset save result when new evaluation is done
+
+      if (result.success) {
+        setDealEvaluation(result);
+        setSaveResult(null); // Reset save result when new evaluation is done
+        toast.success("Evaluation done successfully");
+        return;
+      } else {
+        console.log(result);
+        toast.error(result.message || "An error occurred during evaluation");
+      }
     });
   };
 
   const saveEvaluationHandler = async () => {
-    if (!dealEvaluation || !dealEvaluation.success) {
-      toast({
-        title: "Error",
-        description: "No valid evaluation to save",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const result = await saveEvaluation(dealId, dealEvaluation, screenerId);
-      setSaveResult(result);
-
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: "Evaluation saved successfully",
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: result.error || "Failed to save evaluation",
-          variant: "destructive",
-        });
+    startSavingTransition(async () => {
+      if (!dealEvaluation || !dealEvaluation.success) {
+        toast.error("No valid evaluation to save");
+        return;
       }
-    } catch (error) {
-      console.error("Error saving evaluation:", error);
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred while saving",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSaving(false);
-    }
+
+      try {
+        const result = await saveEvaluation(dealId, dealEvaluation, screenerId);
+        setSaveResult(result);
+
+        if (result.success) {
+          toast.success("Evaluation saved successfully");
+        } else {
+          toast.error(result.error || "Failed to save evaluation");
+        }
+      } catch (error) {
+        console.error("Error saving evaluation:", error);
+        toast.error("An unexpected error occurred while saving");
+      }
+    });
   };
 
   const getSentimentColor = (sentiment: string) => {
@@ -237,9 +228,9 @@ const EvaluateDealComponent = ({
                       View Detailed Analysis
                     </summary>
                     <div className="mt-2 rounded-md bg-muted p-3">
-                      <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
-                        {dealEvaluation.content}
-                      </pre>
+                      <article className="prose prose-sm dark:prose-invert">
+                        <ReactMarkdown>{dealEvaluation.content}</ReactMarkdown>
+                      </article>
                     </div>
                   </details>
                 )}

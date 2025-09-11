@@ -6,6 +6,8 @@ import prismaDB from "@/lib/prisma";
 import { splitContentIntoChunks } from "@/lib/utils";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
+import { headers } from "next/headers";
+import { rateLimit } from "@/lib/redis";
 
 /**
  * Evaluates a deal against a screener
@@ -22,6 +24,23 @@ export async function evaluateDeal(dealId: string, screenerId: string) {
     return {
       success: false,
       error: "Unauthorized",
+    };
+  }
+
+  const ip =
+    (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+  const { ok, remaining, reset } = await rateLimit(
+    `api:evaluate-deal:${ip}`,
+    10, // 10 requests per minute
+    60_000, // 1 minute
+  );
+
+  if (!ok) {
+    console.log("Rate limit excedded for evaluate deal");
+
+    return {
+      success: false,
+      message: "Too many requests",
     };
   }
 

@@ -38,7 +38,7 @@ const NotificationPopover = ({ userId }: { userId: string }) => {
   const [isPending, startTransition] = useTransition();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isConnectingRef = useRef(false);
+  const retryDelayRef = useRef(1000);
 
   const fetchDeals = useCallback(async () => {
     try {
@@ -77,148 +77,65 @@ const NotificationPopover = ({ userId }: { userId: string }) => {
   const connectWebSocketRef = useRef<() => void>();
 
   const connectWebSocket = useCallback(() => {
-    // Prevent multiple simultaneous connection attempts
-    if (
-      isConnectingRef.current ||
-      wsRef.current?.readyState === WebSocket.OPEN
-    ) {
-      return;
-    }
+    const url = process.env.NEXT_PUBLIC_WEBSOCKET_URL || "ws://localhost:8080";
 
-    isConnectingRef.current = true;
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
 
-    // Get WebSocket URL from environment or use default
-    const wsUrl =
-      process.env.NEXT_PUBLIC_WEBSOCKET_URL || "ws://localhost:8080";
-
-    try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log("✅ WebSocket connected");
-        setWsConnected(true);
-        isConnectingRef.current = false;
-
-        // Clear any existing reconnect timeout
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-
-        // Register the user
-        ws.send(
-          JSON.stringify({
-            type: "register",
-            userId,
-          }),
-        );
-      };
-
-      ws.onmessage = (e) => {
-        console.log("📨 Received WebSocket message:", e.data);
-
-        try {
-          const msg: WebSocketMessage = JSON.parse(e.data);
-
-          // Validate message structure
-          if (!msg || typeof msg.type !== "string") {
-            console.warn("⚠️ Invalid WebSocket message format:", msg);
-            return;
-          }
-
-          if (msg.type === "registered") {
-            console.log("✅ User registered with WebSocket server");
-          }
-
-          if (msg.type === "new_screen_call") {
-            console.log("🆕 New screen call received");
-            fetchAndTransition();
-          }
-
-          if (msg.type === "problem_done" && msg.productId) {
-            console.log("✅ Problem done received:", msg);
-            setDeals((prev) => {
-              const dealExists = prev.some((d) => d.id === msg.productId);
-              if (dealExists) {
-                console.log(
-                  `Deal ${msg.productId} completed with status: ${msg.status || "unknown"}`,
-                );
-                return prev.filter((d) => d.id !== msg.productId);
-              }
-              return prev;
-            });
-          }
-        } catch (error) {
-          console.error("❌ Error parsing WebSocket message:", error);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error("❌ WebSocket error:", error);
-        setWsConnected(false);
-        isConnectingRef.current = false;
-      };
-
-      ws.onclose = (event) => {
-        console.log(
-          "🔌 WebSocket connection closed:",
-          event.code,
-          event.reason,
-        );
-        setWsConnected(false);
-        isConnectingRef.current = false;
-
-        // Attempt to reconnect after 3 seconds, but only if not a normal closure
-        if (event.code !== 1000 && event.code !== 1001) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log("🔄 Attempting to reconnect WebSocket...");
-            // Use the ref to avoid dependency issues
-            connectWebSocketRef.current?.();
-          }, 3000);
-        }
-      };
-    } catch (error) {
-      console.error("❌ Failed to create WebSocket connection:", error);
-      setWsConnected(false);
-      isConnectingRef.current = false;
-
-      // Attempt to reconnect after 5 seconds
-      reconnectTimeoutRef.current = setTimeout(() => {
-        console.log("🔄 Attempting to reconnect WebSocket...");
-        // Use the ref to avoid dependency issues
-        connectWebSocketRef.current?.();
-      }, 5000);
-    }
-  }, [userId, fetchAndTransition]);
-
-  // Store the function in the ref
-  useEffect(() => {
-    connectWebSocketRef.current = connectWebSocket;
-  }, [connectWebSocket]);
-
-  useEffect(() => {
-    if (userId) {
-      connectWebSocket();
-    }
-
-    return () => {
-      // Cleanup WebSocket connection
-      if (wsRef.current) {
-        wsRef.current.close(1000, "Component unmounting");
-        wsRef.current = null;
-      }
-
-      // Clear reconnect timeout
+    ws.onopen = () => {
+      setWsConnected(true);
+      ws.send(JSON.stringify({ type: "register", userId }));
+      retryDelayRef.current = 1000;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-
-      // Reset connection state
-      isConnectingRef.current = false;
     };
-  }, [userId, connectWebSocket]); // Added connectWebSocket dependency
+    ws.onmessage = (e) => {
+      try {
+        const msg: WebSocketMessage = JSON.parse(e.data);
+        if (msg.type === "new_screen_call") fetchAndTransition();
+        if (msg.type === "problem_done" && msg.productId) fetchAndTransition();
+      } catch {}
+    };
+    const scheduleReconnect = () => {
+      if (reconnectTimeoutRef.current) return;
+      const delay = Math.min(retryDelayRef.current, 10000);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectTimeoutRef.current = null;
+        connectWebSocket();
+      }, delay);
+      retryDelayRef.current = Math.min(delay * 2, 10000);
+    };
+    ws.onclose = () => {
+      setWsConnected(false);
+      scheduleReconnect();
+    };
+    ws.onerror = () => {
+      setWsConnected(false);
+      scheduleReconnect();
+    };
+  }, [userId, fetchAndTransition]);
+
+  useEffect(() => {
+    if (!userId) return;
+    connectWebSocket();
+    return () => {
+      wsRef.current?.close();
+      wsRef.current = null;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      retryDelayRef.current = 1000;
+    };
+  }, [userId, connectWebSocket]);
+
+  useEffect(() => {
+    const onFocus = () => fetchAndTransition();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [fetchAndTransition]);
 
   return (
     <div className="relative">

@@ -2,8 +2,10 @@
 
 import { auth } from "@/auth";
 import prismaDB from "@/lib/prisma";
+import { rateLimit } from "@/lib/redis";
 import { Sentiment } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 
 interface DealEvaluation {
   success: boolean;
@@ -53,6 +55,23 @@ export async function saveEvaluation(
       };
     }
 
+    const ip =
+      (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+    const { ok, remaining, reset } = await rateLimit(
+      `api:save-evaluation:${ip}`,
+      10, // 10 requests per minute
+      60_000, // 1 minute
+    );
+
+    if (!ok) {
+      console.log("Rate limit excedded for save evaluation");
+
+      return {
+        success: false,
+        message: "Too many requests",
+      };
+    }
+
     // Map sentiment string to enum
     let sentiment: Sentiment = Sentiment.NEUTRAL;
     if (evaluation.sentiment) {
@@ -76,9 +95,10 @@ export async function saveEvaluation(
         dealId,
         title: evaluation.title,
         explanation: evaluation.explanation,
-        score: evaluation.score ? Math.round(evaluation.score) : null, // Convert to integer if provided
-        sentiment,
+        score: evaluation.score ? Math.round(evaluation.score) : null,
         content: evaluation.content || null,
+        sentiment,
+        screenerId,
       },
     });
 
