@@ -10,6 +10,7 @@ import { ChatbotSidebar } from "@/components/ChatbotSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Mic, MicOff, Plus, Paperclip, Image as ImageIcon, X, Sparkles, Send } from "lucide-react";
 import TextToSpeech from "@/components/TextToSpeech";
+import ReactMarkdown from "react-markdown";
 
 
 type ChatMessage = {
@@ -39,6 +40,8 @@ export default function ChatbotPage() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
 
   // Attachments state
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -61,128 +64,225 @@ export default function ChatbotPage() {
     "Explain EBITDA margin like I'm new to finance",
   ];
 
-  // Load from localStorage
+  // Load from DB
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? (JSON.parse(raw) as Conversation[]) : [];
-      setConversations(parsed);
-      const savedActive = localStorage.getItem(ACTIVE_KEY);
-      if (savedActive && parsed.find(c => c.id === savedActive)) {
-        setActiveId(savedActive);
-      } else if (parsed[0]) {
-        setActiveId(parsed[0].id);
+    const loadConversations = async () => {
+      try {
+        const res = await fetch("/api/chat/conversations");
+        // Tell TypeScript what the expected shape of the data is
+        const data: { conversations: Conversation[] } = await res.json();
+
+        if (data?.conversations) {
+          const fixedConversations = data.conversations.map(conv => ({
+            ...conv,
+            title:
+              conv.title === "New Chat" &&
+              Array.isArray(conv.messages) &&
+              conv.messages.length > 0 &&
+              conv.messages[0]?.content
+                ? conv.messages[0].content.slice(0, 30)
+                : conv.title,
+          }));
+
+          setConversations(fixedConversations);
+          setActiveId(fixedConversations[0]?.id ?? null);
+        }
+      } catch (error) {
+        console.error("Failed to load conversations from DB:", error);
+      } finally {
+        setIsLoading(false);
       }
-    } catch {
-      // ignore
-    }
+    };
+
+    loadConversations();
   }, []);
 
-  // Persist to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    } catch {
-      // ignore
-    }
-  }, [conversations]);
-
-  useEffect(() => {
-    if (activeId) {
-      try {
-        localStorage.setItem(ACTIVE_KEY, activeId);
-      } catch {
-        // ignore
-      }
-    }
-  }, [activeId]);
-
-  const activeConversation = useMemo(
-    () => conversations.find(c => c.id === activeId) || null,
-    [conversations, activeId],
-  );
-
-  function handleNewChat() {
-    const id = generateId("conv");
-    const newConv: Conversation = {
-      id,
-      title: "New chat",
-      createdAt: Date.now(),
-      messages: [],
+  const activeConversation = useMemo(() => {
+    const conv = conversations.find(c => c.id === activeId);
+    if (!conv) return null;
+    const sortedMessages = Array.isArray(conv.messages)
+      ? [...conv.messages].sort((a, b) => a.createdAt - b.createdAt)
+      : [];
+    return {
+      ...conv,
+      messages: sortedMessages,
     };
-    setConversations(prev => [newConv, ...prev]);
-    setActiveId(id);
-    setInput("");
-    setAttachments([]);
-    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [conversations, activeId]);
+
+  async function handleNewChat() {
+    try {
+      const defaultTitle = starterPrompts[0] || "New Chat";
+
+      const res = await fetch("/api/chat/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: defaultTitle }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.conversation) {
+        setConversations(prev => {
+          const exists = prev.some(c => c.id === data.conversation.id);
+          return exists ? prev : [data.conversation, ...prev];
+        });
+        setActiveId(data.conversation.id);
+        setInput("");
+        setTimeout(() => inputRef.current?.focus(), 0);
+      } else {
+        console.error("Failed to create conversation:", data.error);
+      }
+    } catch (err) {
+      console.error("Error creating conversation:", err);
+    }
   }
 
-  function handleDeleteConversation(id: string) {
+  async function handleDeleteConversation(id: string) {
     setConversations(prev => prev.filter(c => c.id !== id));
     if (activeId === id) {
       const remaining = conversations.filter(c => c.id !== id);
       setActiveId(remaining[0]?.id ?? null);
     }
+    try {
+      await fetch(`/api/chat/delete?conversationId=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+    }
   }
 
   async function sendMessage() {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isSending) return;
-    let convId = activeId;
-    // Create a conversation if none exists
-    if (!convId) {
-      const id = generateId("conv");
-      const newConv: Conversation = {
-        id,
-        title: trimmed.slice(0, 30) || "New chat",
-        createdAt: Date.now(),
-        messages: [],
-      };
-      setConversations(prev => [newConv, ...prev]);
-      setActiveId(id);
-      convId = id;
+    if (!trimmed || isSending) return;
+
+    setIsSending(true);
+    setInput("");
+
+    const messageId = generateId("user");
+    const assistantId = generateId("assistant");
+
+    const now = Date.now();
+
+    const userMessage: ChatMessage = {
+      id: messageId,
+      role: "user",
+      content: trimmed,
+      createdAt: now,
+    };
+
+    const assistantMessage: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      createdAt: now + 1,
+    };
+
+    // Optimistically add user and empty assistant message
+    setConversations(prev => {
+      const updated = prev.map(conv => {
+        if (conv.id === activeId) {
+          return {
+            ...conv,
+            messages: [...(conv.messages ?? []), userMessage, assistantMessage],
+          };
+        }
+        return conv;
+      });
+      return updated;
+    });
+
+    // Start streaming
+    setTypingMessageId(assistantId);
+    let streamedContent = "";
+    const updatedConversation = await assistantReplyFromGoogle(trimmed, activeId, (chunk) => {
+      streamedContent += chunk;
+      setConversations(prev =>
+        prev.map(conv => {
+          if (conv.id === activeId) {
+            return {
+              ...conv,
+              messages: conv.messages.map(msg =>
+                msg.id === assistantId ? { ...msg, content: streamedContent } : msg
+              ),
+            };
+          }
+          return conv;
+        })
+      );
+    });
+
+    if (updatedConversation) {
+      const sortedMessages = [...(updatedConversation.messages || [])].sort(
+        (a, b) => a.createdAt - b.createdAt
+      );
+      const firstMessageContent = sortedMessages[0]?.content ?? "New Chat";
+      const newTitle = firstMessageContent.slice(0, 30);
+
+      setConversations(prev => {
+        const others = prev.filter(c => c.id !== updatedConversation.id);
+        const updatedConv = { ...updatedConversation, messages: sortedMessages, title: newTitle };
+        return [updatedConv, ...others];
+      });
+
+      setActiveId(updatedConversation.id);
+
+      await fetch("/api/chat/update-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: updatedConversation.id, title: newTitle }),
+      });
     }
 
-    const contentWithAttachmentNote =
-      attachments.length > 0
-        ? `${trimmed}${trimmed ? "\n\n" : ""}(Attached ${attachments.length} file${attachments.length > 1 ? "s" : ""})`
-        : trimmed;
-
-    const userMsg: ChatMessage = {
-      id: generateId("msg"),
-      role: "user",
-      content: contentWithAttachmentNote,
-      createdAt: Date.now(),
-    };
-
-    setInput("");
-    setIsSending(true);
-    setAttachments([]);
-    setConversations(prev =>
-      prev.map(c =>
-        c.id === convId
-          ? {
-              ...c,
-              title: c.messages.length === 0 ? contentWithAttachmentNote.slice(0, 30) || c.title : c.title,
-              messages: [...c.messages, userMsg],
-            }
-          : c,
-      ),
-    );
-
-    // Simulate assistant reply locally (no backend calls)
-    await new Promise(r => setTimeout(r, 400));
-    const assistantMsg: ChatMessage = {
-      id: generateId("msg"),
-      role: "assistant",
-      content: `Pretend AI: ${trimmed || "Received your attachments."}`,
-      createdAt: Date.now(),
-    };
-    setConversations(prev =>
-      prev.map(c => (c.id === convId ? { ...c, messages: [...c.messages, assistantMsg] } : c)),
-    );
+    setTypingMessageId(null);
     setIsSending(false);
   }
+
+  const assistantReplyFromGoogle = async (
+    message: string,
+    conversationId: string | null,
+    onStreamChunk?: (chunk: string) => void
+  ): Promise<Conversation | null> => {
+    try {
+      const res = await fetch("/api/chat/ask-google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, conversationId }),
+      });
+
+      if (!res.body) {
+        throw new Error("No response body for streaming");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+
+      let assistantMessage = "";
+      let newConversation: Conversation | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        assistantMessage += chunk;
+
+        // Push streamed chunk to UI
+        onStreamChunk?.(chunk);
+      }
+
+      // Once stream is done, refetch full updated conversation
+      const finalRes = await fetch("/api/chat/conversations");
+      const finalData: { conversations: Conversation[] } = await finalRes.json();
+
+      newConversation = finalData.conversations.find(c => c.id === conversationId) ?? null;
+
+      return newConversation;
+    } catch (err) {
+      console.error("Streaming failed:", err);
+      return null;
+    }
+  };
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -382,21 +482,27 @@ export default function ChatbotPage() {
                             <AvatarFallback>AI</AvatarFallback>
                           </Avatar>
                           <div className="flex items-start gap-2">
-                            <div className={cn(
-                              "prose prose-sm max-w-[80%] rounded-2xl border bg-accent px-4 py-3 text-sm leading-relaxed shadow-sm dark:prose-invert",
-                            )}>
-                              {msg.content}
+                            <div
+                              className={cn(
+                                "prose prose-sm max-w-[80%] rounded-2xl border bg-accent px-4 py-3 text-sm leading-relaxed shadow-sm dark:prose-invert",
+                              )}
+                            >
+                              <ReactMarkdown>
+                                {typingMessageId === msg.id ? msg.content + "▍" : msg.content}
+                              </ReactMarkdown>
                             </div>
                             <TextToSpeech text={msg.content} />
                           </div>
                         </>
                       ) : (
                         <>
-                          <div className={cn(
-                            "prose prose-sm max-w-[80%] rounded-2xl border px-4 py-3 text-sm leading-relaxed text-primary-foreground shadow-sm dark:prose-invert",
-                            "bg-primary",
-                          )}>
-                            {msg.content}
+                          <div
+                            className={cn(
+                              "prose prose-sm max-w-[80%] rounded-2xl border px-4 py-3 text-sm leading-relaxed text-primary-foreground shadow-sm dark:prose-invert",
+                              "bg-primary",
+                            )}
+                          >
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
                           </div>
                           <Avatar className="h-8 w-8">
                             <AvatarFallback>U</AvatarFallback>
